@@ -1,27 +1,22 @@
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from database import get_db
 from models import User
 from schemas import TokenData
+from services.encryption_service import EncryptionService
+from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
-# Security configuration
-SECRET_KEY = "your-secret-key-change-this-in-production-use-env-variable"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 security = HTTPBearer()
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    return EncryptionService.verify_password(plain_password, hashed_password)
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    return EncryptionService.hash_password(password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None, biometric_verified: bool = False):
     to_encode = data.copy()

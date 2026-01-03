@@ -2,6 +2,7 @@ import base64
 import hashlib
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import os
+from config import BIOMETRIC_ENCRYPTION_KEY, BIOMETRIC_ENCRYPTION_SALT
 
 
 class EncryptionService:
@@ -13,19 +14,12 @@ class EncryptionService:
         Uses AES-256-GCM for authenticated encryption.
         
         Args:
-            password: Encryption password (defaults to env variable or hardcoded value)
-            salt: Salt for key derivation (defaults to env variable or hardcoded value)
+            password: Encryption password (defaults to config value)
+            salt: Salt for key derivation (defaults to config value)
         """
-        # In production, these should come from environment variables
-        self.password = password or os.getenv(
-            'BIOMETRIC_ENCRYPTION_KEY',
-            'your-biometric-encryption-key-change-in-production'
-        ).encode()
-        
-        self.salt = salt or os.getenv(
-            'BIOMETRIC_ENCRYPTION_SALT',
-            'biometric-salt-change-in-production'
-        ).encode()
+        # Use config values as defaults
+        self.password = password or BIOMETRIC_ENCRYPTION_KEY.encode()
+        self.salt = salt or BIOMETRIC_ENCRYPTION_SALT.encode()
         
         self.encryption_key = self._generate_encryption_key()
         self.cipher = AESGCM(self.encryption_key)
@@ -148,6 +142,33 @@ class EncryptionService:
             return self.cipher.decrypt(nonce, ciphertext, None)
         except Exception as e:
             raise ValueError(f"Failed to decrypt bytes: {str(e)}")
+    
+    @staticmethod
+    def hash_password(password: str) -> str:
+        """
+        Hash a password using SHA-256.
+        
+        Args:
+            password: Plain text password
+            
+        Returns:
+            Hex-encoded SHA-256 hash of the password
+        """
+        return hashlib.sha256(password.encode()).hexdigest()
+    
+    @staticmethod
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
+        """
+        Verify a password against its SHA-256 hash.
+        
+        Args:
+            plain_password: Plain text password to verify
+            hashed_password: Hex-encoded SHA-256 hash to compare against
+            
+        Returns:
+            True if password matches, False otherwise
+        """
+        return hashlib.sha256(plain_password.encode()).hexdigest() == hashed_password
 
 
 # Global singleton instance for convenience
