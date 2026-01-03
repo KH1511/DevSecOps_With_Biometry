@@ -2,18 +2,51 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { WebcamCapture } from '@/components/WebcamCapture';
+import { AudioCapture } from '@/components/AudioCapture';
 import { BiometricType } from '@/types/auth';
-import { ScanFace, Shield, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { ScanFace, Shield, AlertCircle, CheckCircle2, Mic, Fingerprint } from 'lucide-react';
 import { toast } from 'sonner';
+
+const biometricOptions = [
+  {
+    type: 'face' as BiometricType,
+    icon: ScanFace,
+    label: 'Face Recognition',
+    description: 'Use your camera to enroll your face',
+    color: 'info',
+  },
+  {
+    type: 'voice' as BiometricType,
+    icon: Mic,
+    label: 'Voice Recognition',
+    description: 'Record your voice for authentication',
+    color: 'accent',
+  },
+  {
+    type: 'fingerprint' as BiometricType,
+    icon: Fingerprint,
+    label: 'Fingerprint',
+    description: 'Coming soon - Fingerprint enrollment',
+    color: 'primary',
+    disabled: true,
+  },
+];
 
 export function ForcedBiometricEnrollment() {
   const { user, enrollBiometric, loadUser, logout } = useAuth();
   const [isEnrolling, setIsEnrolling] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  const [showAudio, setShowAudio] = useState(false);
   const [enrollmentComplete, setEnrollmentComplete] = useState(false);
+  const [selectedType, setSelectedType] = useState<BiometricType | null>(null);
 
-  const startEnrollment = () => {
-    setShowCamera(true);
+  const startEnrollment = (type: BiometricType) => {
+    setSelectedType(type);
+    if (type === 'face') {
+      setShowCamera(true);
+    } else if (type === 'voice') {
+      setShowAudio(true);
+    }
   };
 
   const handleFaceCapture = async (base64Image: string) => {
@@ -45,6 +78,35 @@ export function ForcedBiometricEnrollment() {
     }
   };
 
+  const handleAudioCapture = async (base64Audio: string) => {
+    setShowAudio(false);
+    setIsEnrolling(true);
+    
+    try {
+      if (user) {
+        const success = await enrollBiometric(user.id, 'voice', base64Audio);
+        
+        if (success) {
+          setEnrollmentComplete(true);
+          toast.success('Voice recognition enrolled successfully!');
+          
+          // Reload user data to update biometric status
+          await loadUser();
+        } else {
+          toast.error('Voice enrollment failed. Please try again.');
+          setIsEnrolling(false);
+        }
+      } else {
+        toast.error('User session not found. Please login again.');
+        setIsEnrolling(false);
+      }
+    } catch (error) {
+      console.error('Voice enrollment error:', error);
+      toast.error('Voice enrollment failed. Please try again.');
+      setIsEnrolling(false);
+    }
+  };
+
   return (
     <>
       {showCamera && (
@@ -53,6 +115,19 @@ export function ForcedBiometricEnrollment() {
           onCancel={() => {
             setShowCamera(false);
             setIsEnrolling(false);
+            setSelectedType(null);
+          }}
+          isEnrollment={true}
+        />
+      )}
+
+      {showAudio && (
+        <AudioCapture
+          onCapture={handleAudioCapture}
+          onCancel={() => {
+            setShowAudio(false);
+            setIsEnrolling(false);
+            setSelectedType(null);
           }}
           isEnrollment={true}
         />
@@ -91,23 +166,36 @@ export function ForcedBiometricEnrollment() {
                   </div>
                 </div>
 
-                <div className="space-y-4">
-                  <Button
-                    variant="terminal"
-                    className="w-full h-auto py-4 flex items-center gap-4 justify-start"
-                    onClick={startEnrollment}
-                    disabled={isEnrolling}
-                  >
-                    <div className="w-12 h-12 bg-info/20 rounded-lg flex items-center justify-center">
-                      <ScanFace className="w-6 h-6 text-info" />
-                    </div>
-                    <div className="text-left">
-                      <div className="font-semibold">Enroll Face Recognition</div>
-                      <div className="text-xs text-muted-foreground">
-                        {isEnrolling ? 'Processing enrollment...' : 'Use your camera to enroll your face'}
-                      </div>
-                    </div>
-                  </Button>
+                <div className="space-y-3">
+                  {biometricOptions.map((option) => {
+                    const Icon = option.icon;
+                    return (
+                      <Button
+                        key={option.type}
+                        variant="terminal"
+                        className="w-full h-auto py-4 flex items-center gap-4 justify-start"
+                        onClick={() => startEnrollment(option.type)}
+                        disabled={isEnrolling || option.disabled}
+                      >
+                        <div className={`w-12 h-12 bg-${option.color}/20 rounded-lg flex items-center justify-center`}>
+                          <Icon className={`w-6 h-6 text-${option.color}`} />
+                        </div>
+                        <div className="text-left flex-1">
+                          <div className="font-semibold flex items-center gap-2">
+                            {option.label}
+                            {option.disabled && (
+                              <span className="text-xs text-muted-foreground font-normal">(Coming Soon)</span>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {isEnrolling && selectedType === option.type
+                              ? 'Processing enrollment...'
+                              : option.description}
+                          </div>
+                        </div>
+                      </Button>
+                    );
+                  })}
                 </div>
 
                 <div className="pt-6 border-t border-border mt-6">

@@ -8,3 +8,5 @@ opencv-python==4.10.0.84
 pillow==11.0.0
 cryptography==42.0.8
 psycopg2-binary==2.9.9
+scipy==1.11.4
+numpy==1.26.4
