@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from datetime import timedelta
 import asyncio
 from typing import List
+import services.fingerprint_recognition_service as fingerprint_service
+
 
 from database import engine, get_db, Base
 from models import User, BiometricData, Command, CommandLog
@@ -174,6 +176,20 @@ async def enroll_biometric(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(e)
             )
+    elif biometric_data.biometric_type == "fingerprint":
+        if not biometric_data.enrollment_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Fingerprint image data is required for fingerprint enrollment"
+            )
+        try:
+            encrypted_encoding = fingerprint_service.enroll_fingerprint(biometric_data.enrollment_data)
+            enrollment_data = encrypted_encoding
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
     elif biometric_data.biometric_type == "voice":
         if not biometric_data.enrollment_data:
             raise HTTPException(
@@ -260,6 +276,38 @@ async def verify_biometric(
             return BiometricResponse(
                 success=False,
                 message=f"Face verification failed (confidence: {result['confidence']:.1f}%)"
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
+    elif biometric_verify.biometric_type == "fingerprint":
+        if not biometric_verify.verification_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Fingerprint image data is required for verification"
+            )
+        try:
+            result = fingerprint_service.verify_fingerprint(
+                biometric_verify.verification_data,
+                biometric.enrollment_data
+            )
+            if result["success"]:
+                access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+                new_token = create_access_token(
+                    data={"sub": current_user.username},
+                    expires_delta=access_token_expires,
+                    biometric_verified=True
+                )
+                return BiometricResponse(
+                    success=True,
+                    message=f"Fingerprint verification successful (confidence: {result['confidence']:.1f}%)",
+                    token=new_token
+                )
+            return BiometricResponse(
+                success=False,
+                message=f"Fingerprint verification failed (confidence: {result['confidence']:.1f}%)"
             )
         except ValueError as e:
             raise HTTPException(
@@ -358,6 +406,28 @@ async def detect_face(
         return {
             "face_detected": False,
             "face_count": 0,
+            "message": f"Error: {str(e)}"
+        }
+
+@app.post("/biometric/detect-fingerprint-quality")
+async def detect_fingerprint_quality(
+    data: dict,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Assess fingerprint image quality for preview/validation"""
+    if "image" not in data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Image data is required"
+        )
+    
+    try:
+        result = fingerprint_service.detect_fingerprint_quality(data["image"])
+        return result
+    except Exception as e:
+        return {
+            "quality": "error",
+            "score": 0,
             "message": f"Error: {str(e)}"
         }
 
