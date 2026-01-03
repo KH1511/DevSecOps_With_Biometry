@@ -4,6 +4,7 @@ from PIL import Image
 import io
 import base64
 import json
+import mediapipe as mp
 from .encryption_service import get_encryption_service
 
 def base64_to_image(base64_string: str) -> np.ndarray:
@@ -31,45 +32,37 @@ def base64_to_image(base64_string: str) -> np.ndarray:
         raise ValueError(f"Invalid image format: {str(e)}")
 
 def extract_face_encoding(image_array: np.ndarray) -> list:
-    """Extract face encoding from image using OpenCV"""
+    """
+    Extract face encoding using MediaPipe FaceMesh (468 landmarks).
+    MediaPipe is lightweight, robust to partial occlusions, and fast on CPU.
+    """
     try:
-        # Convert to grayscale
-        gray = cv2.cvtColor(image_array, cv2.COLOR_BGR2GRAY)
+        mp_face_mesh = mp.solutions.face_mesh
         
-        # Load OpenCV's pre-trained face detector
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        # Convert BGR to RGB for MediaPipe
+        rgb_image = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)
         
-        # Detect faces
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-        
-        if len(faces) == 0:
-            raise ValueError("No face detected in the image")
-        
-        if len(faces) > 1:
-            raise ValueError("Multiple faces detected. Please ensure only one face is visible.")
-        
-        # Get the first (and only) face
-        x, y, w, h = faces[0]
-        
-        # Extract face region
-        face_roi = gray[y:y+h, x:x+w]
-        
-        # Resize to standard size for consistency
-        face_roi = cv2.resize(face_roi, (100, 100))
-        
-        # Normalize pixel values
-        face_roi = face_roi.astype('float32') / 255.0
-        
-        # Flatten to 1D array and create a hash-based encoding
-        face_flat = face_roi.flatten()
-        
-        # Create a more detailed encoding by combining histogram and pixel data
-        hist = cv2.calcHist([face_roi], [0], None, [256], [0, 1]).flatten()
-        
-        # Combine both features
-        encoding = np.concatenate([face_flat[:500], hist[:500]]).tolist()
-        
-        return encoding
+        # Initialize FaceMesh with single face detection
+        with mp_face_mesh.FaceMesh(
+            static_image_mode=True,
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5
+        ) as face_mesh:
+            results = face_mesh.process(rgb_image)
+            
+            if not results.multi_face_landmarks:
+                raise ValueError("No face detected in the image")
+            
+            if len(results.multi_face_landmarks) > 1:
+                raise ValueError("Multiple faces detected. Please ensure only one face is visible.")
+            
+            # Extract landmarks (468 points with x, y, z coordinates normalized [0, 1])
+            landmarks = results.multi_face_landmarks[0].landmark
+            descriptor = np.array([[lm.x, lm.y, lm.z] for lm in landmarks]).flatten()
+            
+            return descriptor.tolist()
+    
     except Exception as e:
         raise ValueError(f"Face encoding failed: {str(e)}")
 

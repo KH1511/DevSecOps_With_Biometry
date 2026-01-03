@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { WebcamCapture } from '@/components/WebcamCapture';
 import { AudioCapture } from '@/components/AudioCapture';
+import { FingerprintCapture } from '@/components/FingerprintCapture';
 import { BiometricType } from '@/types/auth';
 import { 
   Fingerprint, 
@@ -78,6 +79,7 @@ export function BiometricEnrollment({ onBack }: BiometricEnrollmentProps) {
   const [enrollmentComplete, setEnrollmentComplete] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [showAudio, setShowAudio] = useState(false);
+  const [showFingerprint, setShowFingerprint] = useState(false);
 
   const startEnrollment = (type: BiometricType) => {
     setSelectedType(type);
@@ -91,6 +93,10 @@ export function BiometricEnrollment({ onBack }: BiometricEnrollmentProps) {
       // For voice, show audio capture
       setShowAudio(true);
       setIsEnrolling(false);
+    } else if (type === 'fingerprint') {
+      // For fingerprint, show fingerprint capture
+      setShowFingerprint(true);
+      setIsEnrolling(false);
     } else {
       // For other biometrics, use the old flow
       setIsEnrolling(true);
@@ -100,7 +106,6 @@ export function BiometricEnrollment({ onBack }: BiometricEnrollmentProps) {
 
   const handleFaceCapture = async (base64Image: string) => {
     setShowCamera(false);
-    setIsEnrolling(true);
     
     console.log('Face capture received, image length:', base64Image.length);
     console.log('User:', user);
@@ -116,13 +121,11 @@ export function BiometricEnrollment({ onBack }: BiometricEnrollmentProps) {
           toast.success('Face recognition enrolled successfully!');
         } else {
           toast.error('Face enrollment failed. Please try again.');
-          setIsEnrolling(false);
           setSelectedType(null);
         }
       } else {
         console.error('No user found');
         toast.error('User session not found. Please login again.');
-        setIsEnrolling(false);
         setSelectedType(null);
       }
     } catch (error) {
@@ -132,14 +135,12 @@ export function BiometricEnrollment({ onBack }: BiometricEnrollmentProps) {
       } else {
         toast.error('Face enrollment failed. Please try again.');
       }
-      setIsEnrolling(false);
       setSelectedType(null);
     }
   };
 
   const handleAudioCapture = async (base64Audio: string) => {
     setShowAudio(false);
-    setIsEnrolling(true);
 
     try {
       if (user) {
@@ -149,12 +150,10 @@ export function BiometricEnrollment({ onBack }: BiometricEnrollmentProps) {
           toast.success('Voice recognition enrolled successfully!');
         } else {
           toast.error('Voice enrollment failed. Please try again.');
-          setIsEnrolling(false);
           setSelectedType(null);
         }
       } else {
         toast.error('User session not found. Please login again.');
-        setIsEnrolling(false);
         setSelectedType(null);
       }
     } catch (error) {
@@ -164,7 +163,34 @@ export function BiometricEnrollment({ onBack }: BiometricEnrollmentProps) {
       } else {
         toast.error('Voice enrollment failed. Please try again.');
       }
-      setIsEnrolling(false);
+      setSelectedType(null);
+    }
+  };
+
+  const handleFingerprintCapture = async (base64Image: string) => {
+    setShowFingerprint(false);
+
+    try {
+      if (user) {
+        const success = await enrollBiometric(user.id, 'fingerprint', base64Image);
+        if (success) {
+          setEnrollmentComplete(true);
+          toast.success('Fingerprint enrolled successfully!');
+        } else {
+          toast.error('Fingerprint enrollment failed. Please try again.');
+          setSelectedType(null);
+        }
+      } else {
+        toast.error('User session not found. Please login again.');
+        setSelectedType(null);
+      }
+    } catch (error) {
+      console.error('Fingerprint enrollment error:', error);
+      if (error instanceof Error) {
+        toast.error(`Fingerprint enrollment failed: ${error.message}`);
+      } else {
+        toast.error('Fingerprint enrollment failed. Please try again.');
+      }
       setSelectedType(null);
     }
   };
@@ -228,49 +254,27 @@ export function BiometricEnrollment({ onBack }: BiometricEnrollmentProps) {
     );
   }
 
-  if (selectedType && isEnrolling) {
+  if (selectedType && isEnrolling && !showCamera && !showAudio && !showFingerprint) {
     const config = biometricConfig[selectedType];
     const Icon = config.icon;
-    const steps = enrollmentSteps[selectedType];
-    const progress = ((currentStep + 1) / steps.length) * 100;
 
     return (
-      <div className="bg-card border border-border rounded-lg p-8">
-        <div className="text-center mb-8">
-          <div className={`w-24 h-24 mx-auto ${config.bgColor} rounded-full flex items-center justify-center border-2 ${config.borderColor} animate-pulse mb-6`}>
-            {selectedType === 'face' && <Camera className={`w-12 h-12 ${config.color}`} />}
-            {selectedType === 'fingerprint' && <Icon className={`w-12 h-12 ${config.color}`} />}
-            {selectedType === 'voice' && <Volume2 className={`w-12 h-12 ${config.color}`} />}
-          </div>
-          <h3 className="text-xl font-bold mb-2">{config.label} Enrollment</h3>
-          <p className="text-muted-foreground font-mono text-sm">
-            Step {currentStep + 1} of {steps.length}
-          </p>
+      <div className="bg-card border border-border rounded-lg p-8 text-center">
+        <div className={`w-24 h-24 mx-auto ${config.bgColor} rounded-full flex items-center justify-center border-2 ${config.borderColor} animate-pulse mb-6`}>
+          <Icon className={`w-12 h-12 ${config.color}`} />
         </div>
-
-        <div className="mb-6">
-          <Progress value={progress} className="h-2 mb-4" />
-          <div className="bg-secondary/50 rounded-lg p-4 border border-border">
-            <p className="text-center font-medium text-lg">
-              {steps[currentStep]}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex justify-center gap-2">
-          {[...Array(5)].map((_, i) => (
+        <h3 className="text-xl font-bold mb-2">Processing...</h3>
+        <p className="text-muted-foreground">
+          Enrolling your {config.label.toLowerCase()}, please wait...
+        </p>
+        <div className="mt-6 flex justify-center gap-2">
+          {[...Array(3)].map((_, i) => (
             <div
               key={i}
               className={`w-3 h-12 ${config.bgColor} rounded animate-pulse`}
               style={{ animationDelay: `${i * 0.15}s` }}
             />
           ))}
-        </div>
-
-        <div className="mt-8 text-center">
-          <Button variant="ghost" onClick={resetEnrollment} disabled={isEnrolling}>
-            Cancel Enrollment
-          </Button>
         </div>
       </div>
     );
@@ -299,6 +303,18 @@ export function BiometricEnrollment({ onBack }: BiometricEnrollmentProps) {
             setIsEnrolling(false);
           }}
           isEnrollment={true}
+        />
+      )}
+
+      {showFingerprint && (
+        <FingerprintCapture
+          mode="enroll"
+          onCapture={handleFingerprintCapture}
+          onCancel={() => {
+            setShowFingerprint(false);
+            setSelectedType(null);
+            setIsEnrolling(false);
+          }}
         />
       )}
       

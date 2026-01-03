@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { X, Mic, MicOff, Check, RotateCcw } from 'lucide-react';
+import { X, Mic, MicOff, Check, RotateCcw, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 // @ts-ignore
 import RecordRTC from 'recordrtc';
@@ -19,6 +19,9 @@ export function AudioCapture({ onCapture, onCancel, isEnrollment = false }: Audi
   const [recordedAudio, setRecordedAudio] = useState<string | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [permissionDenied, setPermissionDenied] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  
+  const REQUIRED_DURATION = isEnrollment ? 30 : 10; // 30s for enrollment, 10s for verification
 
   useEffect(() => {
     return () => {
@@ -49,18 +52,18 @@ export function AudioCapture({ onCapture, onCancel, isEnrollment = false }: Audi
       // Track recording duration
       const startTime = Date.now();
       const interval = setInterval(() => {
-        setRecordingDuration(Math.floor((Date.now() - startTime) / 1000));
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        setRecordingDuration(elapsed);
+        
+        // Auto-stop at required duration (30s enrollment, 10s verification)
+        if (elapsed >= REQUIRED_DURATION) {
+          clearInterval(interval);
+          stopRecording();
+          toast.success(`Recording complete! (${REQUIRED_DURATION} seconds)`);
+        }
       }, 100);
 
       (window as any).__recordInterval = interval;
-
-      // Auto-stop after 10 seconds
-      setTimeout(() => {
-        if (recorderRef.current && isRecording) {
-          stopRecording();
-          toast.info('Recording stopped (10 second limit)');
-        }
-      }, 10000);
     } catch (error) {
       console.error('Error accessing microphone:', error);
       setPermissionDenied(true);
@@ -102,6 +105,7 @@ export function AudioCapture({ onCapture, onCancel, isEnrollment = false }: Audi
 
   const confirmRecording = () => {
     if (recordedAudio) {
+      setIsProcessing(true);
       onCapture(recordedAudio);
     }
   };
@@ -146,8 +150,8 @@ export function AudioCapture({ onCapture, onCancel, isEnrollment = false }: Audi
 
                   <p className="text-xs text-muted-foreground text-center">
                     {isEnrollment 
-                      ? 'Speak clearly for at least 0.5 seconds' 
-                      : 'Speak the same phrase as during enrollment'}
+                      ? 'Recording will automatically stop after 30 seconds' 
+                      : 'Speak for exactly 10 seconds as during enrollment'}
                   </p>
 
                   <Button
@@ -156,7 +160,7 @@ export function AudioCapture({ onCapture, onCancel, isEnrollment = false }: Audi
                     onClick={startRecording}
                   >
                     <Mic className="w-4 h-4 mr-2" />
-                    Start Recording
+                    Start {REQUIRED_DURATION}-Second Recording
                   </Button>
                 </div>
               ) : (
@@ -167,56 +171,65 @@ export function AudioCapture({ onCapture, onCancel, isEnrollment = false }: Audi
                     </div>
                     <div className="text-center">
                       <p className="font-mono text-lg font-bold text-destructive">
-                        {formatTime(recordingDuration)}
+                        {formatTime(recordingDuration)} / {formatTime(REQUIRED_DURATION)}
                       </p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Recording... (max 10s)
+                        Recording... (auto-stops at {REQUIRED_DURATION}s)
                       </p>
                     </div>
                   </div>
-
-                  <Button
-                    variant="terminal"
-                    className="w-full"
-                    onClick={stopRecording}
-                  >
-                    <MicOff className="w-4 h-4 mr-2" />
-                    Stop Recording
-                  </Button>
                 </div>
               )}
             </div>
           </div>
         ) : (
           <div className="space-y-6">
-            <div className="bg-success/10 border border-success/30 rounded-lg p-6 flex flex-col items-center gap-4">
-              <div className="w-20 h-20 bg-success/20 rounded-full flex items-center justify-center">
-                <Check className="w-10 h-10 text-success" />
+            {isProcessing ? (
+              <div className="bg-primary/10 border border-primary/30 rounded-lg p-6 flex flex-col items-center gap-4">
+                <div className="w-20 h-20 bg-primary/20 rounded-full flex items-center justify-center">
+                  <Loader2 className="w-10 h-10 text-primary animate-spin" />
+                </div>
+                <div className="text-center">
+                  <p className="font-mono text-primary font-bold">
+                    Processing Voice Data
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Analyzing audio features...
+                  </p>
+                </div>
               </div>
-              <div className="text-center">
-                <p className="font-mono text-success font-bold">
-                  Recording Complete
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Duration: {formatTime(recordingDuration)}
-                </p>
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="bg-success/10 border border-success/30 rounded-lg p-6 flex flex-col items-center gap-4">
+                  <div className="w-20 h-20 bg-success/20 rounded-full flex items-center justify-center">
+                    <Check className="w-10 h-10 text-success" />
+                  </div>
+                  <div className="text-center">
+                    <p className="font-mono text-success font-bold">
+                      Recording Complete
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Duration: {formatTime(recordingDuration)}
+                    </p>
+                  </div>
+                </div>
 
-            <div className="flex gap-3">
-              <Button
-                variant="terminal"
-                className="flex-1"
-                onClick={confirmRecording}
-              >
-                <Check className="w-4 h-4 mr-2" />
-                Confirm
-              </Button>
-              <Button variant="outline" onClick={() => discardRecording()}>
-                <RotateCcw className="w-4 h-4 mr-2" />
-                Retake
-              </Button>
-            </div>
+                <div className="flex gap-3">
+                  <Button
+                    variant="terminal"
+                    className="flex-1"
+                    onClick={confirmRecording}
+                  >
+                    <Check className="w-4 h-4 mr-2" />
+                    Confirm
+                  </Button>
+                  <Button variant="outline" onClick={() => discardRecording()}>
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    Retake
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

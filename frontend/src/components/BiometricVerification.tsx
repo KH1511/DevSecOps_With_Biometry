@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { WebcamCapture } from '@/components/WebcamCapture';
 import { AudioCapture } from '@/components/AudioCapture';
+import { FingerprintCapture } from '@/components/FingerprintCapture';
 import { BiometricType } from '@/types/auth';
 import { Fingerprint, ScanFace, Mic, CheckCircle2, XCircle, Shield } from 'lucide-react';
 import { toast } from 'sonner';
@@ -16,7 +17,7 @@ const biometricConfig = {
   fingerprint: {
     icon: Fingerprint,
     label: 'Fingerprint Scan',
-    description: 'Place your finger on the scanner',
+    description: 'Upload your fingerprint image',
   },
   voice: {
     icon: Mic,
@@ -32,6 +33,7 @@ export function BiometricVerification() {
   const [verificationStatus, setVerificationStatus] = useState<'idle' | 'scanning' | 'success' | 'failed'>('idle');
   const [showCamera, setShowCamera] = useState(false);
   const [showAudio, setShowAudio] = useState(false);
+  const [showFingerprint, setShowFingerprint] = useState(false);
 
   const availableBiometrics = user?.biometrics 
     ? (Object.entries(user.biometrics) as [BiometricType, boolean][])
@@ -48,6 +50,9 @@ export function BiometricVerification() {
     } else if (type === 'voice') {
       // For voice, show audio capture
       setShowAudio(true);
+    } else if (type === 'fingerprint') {
+      // For fingerprint, show file upload
+      setShowFingerprint(true);
     } else {
       // For other biometrics, use the old flow
       setIsVerifying(true);
@@ -117,6 +122,29 @@ export function BiometricVerification() {
     }
   };
 
+  const handleFingerprintCapture = async (base64Image: string) => {
+    setShowFingerprint(false);
+    setIsVerifying(true);
+    setVerificationStatus('scanning');
+
+    try {
+      const success = await verifyBiometric('fingerprint', base64Image);
+      if (success) {
+        setVerificationStatus('success');
+        toast.success('Fingerprint verification successful!');
+      } else {
+        setVerificationStatus('failed');
+        toast.error('Fingerprint verification failed. Please try again.');
+      }
+    } catch (error) {
+      console.error('Fingerprint verification error:', error);
+      setVerificationStatus('failed');
+      toast.error('An error occurred during verification.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   const resetVerification = () => {
     setSelectedType(null);
     setVerificationStatus('idle');
@@ -147,7 +175,20 @@ export function BiometricVerification() {
           isEnrollment={false}
         />
       )}
-      
+
+      {showFingerprint && (
+        <FingerprintCapture
+          onCapture={handleFingerprintCapture}
+          onCancel={() => {
+            setShowFingerprint(false);
+            setSelectedType(null);
+            setVerificationStatus('idle');
+          }}
+          mode="verify"
+          disabled={isVerifying}
+        />
+      )}
+
       <div className="w-full max-w-md mx-auto">
         <div className="bg-card border border-border rounded-lg p-8 relative overflow-hidden">
           <div className="absolute inset-0 scan-line pointer-events-none" />

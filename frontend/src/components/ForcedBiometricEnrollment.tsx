@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { WebcamCapture } from '@/components/WebcamCapture';
 import { AudioCapture } from '@/components/AudioCapture';
+import { FingerprintCapture } from '@/components/FingerprintCapture';
 import { BiometricType } from '@/types/auth';
 import { ScanFace, Shield, AlertCircle, CheckCircle2, Mic, Fingerprint } from 'lucide-react';
 import { toast } from 'sonner';
@@ -26,9 +27,9 @@ const biometricOptions = [
     type: 'fingerprint' as BiometricType,
     icon: Fingerprint,
     label: 'Fingerprint',
-    description: 'Coming soon - Fingerprint enrollment',
+    description: 'Upload a clear image of your fingerprint',
     color: 'primary',
-    disabled: true,
+    disabled: false,
   },
 ];
 
@@ -37,6 +38,7 @@ export function ForcedBiometricEnrollment() {
   const [isEnrolling, setIsEnrolling] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [showAudio, setShowAudio] = useState(false);
+  const [showFingerprint, setShowFingerprint] = useState(false);
   const [enrollmentComplete, setEnrollmentComplete] = useState(false);
   const [selectedType, setSelectedType] = useState<BiometricType | null>(null);
 
@@ -46,6 +48,8 @@ export function ForcedBiometricEnrollment() {
       setShowCamera(true);
     } else if (type === 'voice') {
       setShowAudio(true);
+    } else if (type === 'fingerprint') {
+      setShowFingerprint(true);
     }
   };
 
@@ -107,6 +111,35 @@ export function ForcedBiometricEnrollment() {
     }
   };
 
+  const handleFingerprintCapture = async (base64Image: string) => {
+    setShowFingerprint(false);
+    setIsEnrolling(true);
+    
+    try {
+      if (user) {
+        const success = await enrollBiometric(user.id, 'fingerprint', base64Image);
+        
+        if (success) {
+          setEnrollmentComplete(true);
+          toast.success('Fingerprint enrolled successfully!');
+          
+          // Reload user data to update biometric status
+          await loadUser();
+        } else {
+          toast.error('Fingerprint enrollment failed. Please try again.');
+          setIsEnrolling(false);
+        }
+      } else {
+        toast.error('User session not found. Please login again.');
+        setIsEnrolling(false);
+      }
+    } catch (error) {
+      console.error('Fingerprint enrollment error:', error);
+      toast.error('Fingerprint enrollment failed. Please try again.');
+      setIsEnrolling(false);
+    }
+  };
+
   return (
     <>
       {showCamera && (
@@ -130,6 +163,19 @@ export function ForcedBiometricEnrollment() {
             setSelectedType(null);
           }}
           isEnrollment={true}
+        />
+      )}
+
+      {showFingerprint && (
+        <FingerprintCapture
+          onCapture={handleFingerprintCapture}
+          onCancel={() => {
+            setShowFingerprint(false);
+            setIsEnrolling(false);
+            setSelectedType(null);
+          }}
+          mode="enroll"
+          disabled={isEnrolling}
         />
       )}
 

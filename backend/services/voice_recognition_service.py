@@ -5,9 +5,28 @@ import wave
 from typing import Tuple
 
 import numpy as np
+import torch
+import torchaudio
+from speechbrain.pretrained import EncoderClassifier
 from scipy.io import wavfile
 
 from .encryption_service import get_encryption_service
+
+# Load SpeechBrain's pre-trained speaker recognition model
+# This model creates speaker embeddings (x-vectors)
+spk_model = None
+
+def get_speaker_model():
+    """Lazy load the SpeechBrain speaker recognition model."""
+    global spk_model
+    if spk_model is None:
+        print("[VOICE] Loading SpeechBrain ECAPA-TDNN speaker recognition model...")
+        spk_model = EncoderClassifier.from_hparams(
+            source="speechbrain/spkrec-ecapa-voxceleb",
+            savedir="/tmp/spkrec-ecapa-voxceleb"
+        )
+        print("[VOICE] Model loaded successfully")
+    return spk_model
 
 
 def _base64_to_audio(base64_string: str) -> Tuple[np.ndarray, int]:
@@ -67,114 +86,125 @@ def _base64_to_audio(base64_string: str) -> Tuple[np.ndarray, int]:
         raise ValueError(f"Invalid audio data: {exc}") from exc
 
 
-def _reduce_vector(vector: np.ndarray, target_len: int) -> np.ndarray:
-    if vector.size == target_len:
-        return vector
-    x_old = np.linspace(0, 1, num=vector.size)
-    x_new = np.linspace(0, 1, num=target_len)
-    return np.interp(x_new, x_old, vector)
-
-
-def extract_voice_signature(base64_audio: str) -> list:
-    """Create a compact voice signature from base64 WAV data."""
-    samples, sample_rate = _base64_to_audio(base64_audio)
-
-    if samples.size < int(sample_rate * 0.3):  # ~300ms minimum
-        raise ValueError("Audio clip too short; provide at least 0.3s of speech")
-
-    # Normalize and remove DC offset
-    samples = samples - np.mean(samples)
-    max_amp = np.max(np.abs(samples)) + 1e-9
-    samples = samples / max_amp
-
-    # Adaptive frame length based on sample rate
-    frame_len = min(2048, max(512, int(sample_rate * 0.03)))
-    hop = frame_len // 2
-
-    frames = []
-    # Ensure we have enough frames for meaningful analysis
-    for start in range(0, max(1, len(samples) - frame_len), hop):
-        if start + frame_len <= len(samples):
-            frame = samples[start:start + frame_len]
-        else:
-            # Pad last frame if needed
-            frame = np.pad(samples[start:], (0, frame_len - len(samples[start:])), mode='constant')
+def extract_voice_embedding(base64_audio: str, required_duration: float, is_enrollment: bool = True) -> list:
+    """
+    Extract speaker embedding using SpeechBrain's ECAPA-TDNN model.
+    
+    Args:
+        base64_audio: Base64-encoded audio data
+        required_duration: Required duration in seconds (30 for enrollment, 10 for verification)
+        is_enrollment: Whether this is enrollment (True) or verification (False)
+    
+    Returns:
+        192-dimensional speaker embedding vector
+    """
+    try:
+        samples, sample_rate = _base64_to_audio(base64_audio)
         
-        windowed = frame * np.hamming(frame_len)
-        spectrum = np.abs(np.fft.rfft(windowed))
-        frames.append(spectrum)
-
-    if not frames:
-        raise ValueError("Unable to extract voice features from audio")
-
-    spec = np.vstack(frames)
-    spec_mean = spec.mean(axis=0)
-    spec_std = spec.std(axis=0)
+        # Calculate actual duration
+        duration = len(samples) / sample_rate
+        
+        operation = "enrollment" if is_enrollment else "verification"
+        
+        # Require exact duration (±1s tolerance)
+        if duration < (required_duration - 1.0):
+            raise ValueError(f"Audio too short for {operation}: {duration:.1f}s. Please record exactly {int(required_duration)} seconds.")
+        
+        if duration > (required_duration + 1.0):
+            raise ValueError(f"Audio too long for {operation}: {duration:.1f}s. Please record exactly {int(required_duration)} seconds.")
+        
+        # Trim or pad to exact duration
+        target_length = int(sample_rate * required_duration)
+        if len(samples) < target_length:
+            samples = np.pad(samples, (0, target_length - len(samples)), mode='constant')
+        else:
+            samples = samples[:target_length]
+        
+        print(f"[VOICE {operation.upper()}] Duration: {len(samples) / sample_rate:.1f}s, Sample rate: {sample_rate}Hz")
+        
+        # Convert to torch tensor and add batch dimension
+        waveform = torch.from_numpy(samples).float().unsqueeze(0)
+        
+        # Resample to 16kHz if needed (SpeechBrain models expect 16kHz)
+        if sample_rate != 16000:
+            resampler = torchaudio.transforms.Resample(sample_rate, 16000)
+            waveform = resampler(waveform)
+            print(f"[VOICE {operation.upper()}] Resampled to 16kHz")
+        
+        # Extract speaker embedding using SpeechBrain model
+        model = get_speaker_model()
+        with torch.no_grad():
+            embedding = model.encode_batch(waveform)
+            # Convert to numpy and flatten
+            embedding = embedding.squeeze().cpu().numpy()
+        
+        print(f"[VOICE {operation.upper()}] Embedding shape: {embedding.shape}")
+        print(f"[VOICE {operation.upper()}] Embedding range: [{embedding.min():.4f}, {embedding.max():.4f}]")
+        
+        return embedding.tolist()
     
-    # Add spectral centroid and rolloff for better discrimination
-    freqs = np.fft.rfftfreq(frame_len, 1.0 / sample_rate)
-    spectral_centroid = np.sum(freqs * spec_mean) / (np.sum(spec_mean) + 1e-9)
-    
-    target_bins = 96
-    mean_reduced = _reduce_vector(spec_mean, target_bins)
-    std_reduced = _reduce_vector(spec_std, target_bins)
-
-    energy = float(np.mean(np.square(samples)))
-    zcr = float(np.mean(np.abs(np.diff(np.sign(samples)))) / 2)
-    
-    # Normalize spectral centroid to 0-1 range
-    normalized_centroid = float(min(1.0, spectral_centroid / (sample_rate / 2)))
-
-    signature = np.concatenate([
-        mean_reduced,
-        std_reduced,
-        np.array([energy, zcr, normalized_centroid], dtype=np.float32)
-    ])
-
-    # Normalize the final signature to unit length
-    sig_norm = np.linalg.norm(signature)
-    if sig_norm > 0:
-        signature = signature / sig_norm
-
-    return signature.tolist()
+    except Exception as e:
+        raise ValueError(f"Voice embedding extraction failed: {str(e)}")
 
 
 def enroll_voice(base64_audio: str) -> str:
-    """Generate and encrypt a voice signature for storage."""
+    """Generate and encrypt a voice embedding for storage (30 seconds)."""
     encryption_service = get_encryption_service()
-    signature = extract_voice_signature(base64_audio)
-    return encryption_service.encrypt(json.dumps(signature))
+    embedding = extract_voice_embedding(base64_audio, required_duration=30.0, is_enrollment=True)
+    return encryption_service.encrypt(json.dumps(embedding))
 
 
-def verify_voice(base64_audio: str, stored_encrypted_signature: str, tolerance: float = 0.35) -> dict:
-    """Compare incoming audio against stored signature and return match metadata."""
-    encryption_service = get_encryption_service()
-
-    new_signature = np.array(extract_voice_signature(base64_audio))
-    stored_signature = np.array(json.loads(encryption_service.decrypt(stored_encrypted_signature)))
-
-    # Normalize both signatures to unit vectors for better cosine similarity
-    new_norm = np.linalg.norm(new_signature)
-    stored_norm = np.linalg.norm(stored_signature)
+def verify_voice(base64_audio: str, stored_encrypted_embedding: str, tolerance: float = 0.25) -> dict:
+    """
+    Compare incoming audio (10s) against stored embedding (30s) using cosine similarity.
+    SpeechBrain embeddings are designed to be robust across different durations.
+    Requires 75% similarity (tolerance 0.25) for match.
     
-    if new_norm == 0 or stored_norm == 0:
-        similarity = 0.0
-    else:
-        new_normalized = new_signature / new_norm
-        stored_normalized = stored_signature / stored_norm
-        similarity = float(np.dot(new_normalized, stored_normalized))
-
-    # Similarity ranges from -1 to 1, convert to 0-100 scale
-    # Shift from [-1, 1] to [0, 2], then to [0, 100]
-    confidence = max(0.0, min(100.0, (similarity + 1.0) * 50.0))
+    Args:
+        base64_audio: Base64-encoded audio (10 seconds)
+        stored_encrypted_embedding: Encrypted enrollment embedding (from 30s audio)
+        tolerance: Similarity tolerance (default 0.25 = 75% threshold)
     
-    # Lower tolerance is more permissive (higher threshold = harder to match)
-    threshold = 1.0 - tolerance  # e.g., tolerance 0.35 -> threshold 0.65
-    is_match = similarity >= threshold
+    Returns:
+        Dictionary with success, confidence, similarity, and threshold
+    """
+    try:
+        encryption_service = get_encryption_service()
 
-    return {
-        "success": bool(is_match),
-        "confidence": confidence,
-        "similarity": similarity,
-        "threshold": threshold
-    }
+        # Extract 10-second verification embedding
+        new_embedding = np.array(extract_voice_embedding(base64_audio, required_duration=10.0, is_enrollment=False))
+        # Load 30-second enrollment embedding
+        stored_embedding = np.array(json.loads(encryption_service.decrypt(stored_encrypted_embedding)))
+
+        print(f"[VOICE VERIFY] Embedding lengths - New: {len(new_embedding)}, Stored: {len(stored_embedding)}")
+        
+        # Calculate cosine similarity
+        dot_product = np.dot(new_embedding, stored_embedding)
+        norm_new = np.linalg.norm(new_embedding)
+        norm_stored = np.linalg.norm(stored_embedding)
+        
+        if norm_new == 0 or norm_stored == 0:
+            similarity = 0.0
+        else:
+            similarity = float(dot_product / (norm_new * norm_stored))
+        
+        # Map similarity to confidence percentage [0, 100]
+        similarity = max(-1.0, min(1.0, similarity))
+        confidence = max(0.0, min(100.0, (similarity + 1.0) * 50.0))
+        
+        # Require 75% similarity for match
+        # SpeechBrain embeddings are normalized, so cosine similarity typically ranges 0.6-1.0 for same speaker
+        threshold = 1.0 - tolerance
+        is_match = similarity >= threshold
+        
+        print(f"[VOICE VERIFY] Cosine Similarity: {similarity:.4f}, Threshold: {threshold:.4f}, Match: {is_match}")
+        print(f"[VOICE VERIFY] Confidence: {confidence:.2f}%, Tolerance: {tolerance}")
+
+        return {
+            "success": bool(is_match),
+            "confidence": float(confidence),
+            "similarity": float(similarity),
+            "threshold": float(threshold)
+        }
+    except Exception as e:
+        raise ValueError(f"Voice verification failed: {str(e)}")

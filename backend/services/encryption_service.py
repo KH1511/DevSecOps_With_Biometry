@@ -1,17 +1,18 @@
 import base64
 import hashlib
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 import os
 from config import BIOMETRIC_ENCRYPTION_KEY, BIOMETRIC_ENCRYPTION_SALT
 
 
 class EncryptionService:
-    """Service for encrypting and decrypting sensitive data using AES-256-GCM"""
+    """Service for encrypting and decrypting sensitive data using AES-256-CBC"""
     
     def __init__(self, password: bytes = None, salt: bytes = None):
         """
         Initialize the encryption service with a password and salt.
-        Uses AES-256-GCM for authenticated encryption.
+        Uses AES-256-CBC for encryption as per the BiometricProcessor standard.
         
         Args:
             password: Encryption password (defaults to config value)
@@ -22,57 +23,58 @@ class EncryptionService:
         self.salt = salt or BIOMETRIC_ENCRYPTION_SALT.encode()
         
         self.encryption_key = self._generate_encryption_key()
-        self.cipher = AESGCM(self.encryption_key)
     
     def _generate_encryption_key(self) -> bytes:
         """
-        Generate AES-256 encryption key from password and salt using SHA-256.
+        Generate AES-256 encryption key from password using SHA-256.
+        This matches the BiometricProcessor implementation.
         
         Returns:
             32-byte (256-bit) encryption key
         """
-        # Combine password and salt
-        combined = self.password + self.salt
-        
-        # Hash using SHA-256 to get 32-byte key
-        key = hashlib.sha256(combined).digest()
-        
+        # Hash the key string to get 32 bytes (256 bits)
+        key = hashlib.sha256(self.password).digest()
         return key
     
     def encrypt(self, data: str) -> str:
         """
-        Encrypt string data using AES-256-GCM.
+        Encrypt string data using AES-256-CBC.
+        Matches the BiometricProcessor encryption approach.
         
         Args:
             data: Plain text string to encrypt
             
         Returns:
-            Base64-encoded encrypted string (includes nonce and ciphertext)
+            Base64-encoded encrypted string (IV on first line, ciphertext on second line)
             
         Raises:
             ValueError: If encryption fails
         """
         try:
-            # Generate a random 96-bit nonce (12 bytes) for GCM
-            nonce = os.urandom(12)
+            data_bytes = data.encode('utf-8')
             
-            # Encrypt the data
-            ciphertext = self.cipher.encrypt(nonce, data.encode(), None)
+            # Create AES cipher in CBC mode
+            cipher = AES.new(self.encryption_key, AES.MODE_CBC)
             
-            # Combine nonce and ciphertext for storage
-            encrypted_data = nonce + ciphertext
+            # Encrypt with padding
+            cipher_text = cipher.encrypt(pad(data_bytes, AES.block_size))
             
-            # Encode as base64 for storage/transmission
-            return base64.b64encode(encrypted_data).decode()
+            # Encode IV and ciphertext as base64
+            iv = base64.b64encode(cipher.iv).decode('utf-8')
+            encrypted_data = base64.b64encode(cipher_text).decode('utf-8')
+            
+            # Return IV and encrypted data separated by newline
+            return iv + '\n' + encrypted_data
         except Exception as e:
             raise ValueError(f"Failed to encrypt data: {str(e)}")
     
     def decrypt(self, encrypted_data: str) -> str:
         """
-        Decrypt encrypted string data using AES-256-GCM.
+        Decrypt encrypted string data using AES-256-CBC.
+        Matches the BiometricProcessor decryption approach.
         
         Args:
-            encrypted_data: Base64-encoded encrypted string
+            encrypted_data: Base64-encoded encrypted string (IV and ciphertext separated by newline)
             
         Returns:
             Decrypted plain text string
@@ -81,51 +83,55 @@ class EncryptionService:
             ValueError: If decryption fails
         """
         try:
-            # Decode from base64
-            encrypted_bytes = base64.b64decode(encrypted_data.encode())
+            # Split IV and ciphertext
+            lines = encrypted_data.strip().split('\n')
+            if len(lines) != 2:
+                raise ValueError("Invalid encrypted data format")
             
-            # Extract nonce (first 12 bytes) and ciphertext
-            nonce = encrypted_bytes[:12]
-            ciphertext = encrypted_bytes[12:]
+            iv = base64.b64decode(lines[0])
+            cipher_text = base64.b64decode(lines[1])
             
-            # Decrypt the data
-            decrypted = self.cipher.decrypt(nonce, ciphertext, None)
+            # Create AES cipher with stored IV
+            cipher = AES.new(self.encryption_key, AES.MODE_CBC, iv)
             
-            return decrypted.decode()
+            # Decrypt and unpad
+            decrypted = unpad(cipher.decrypt(cipher_text), AES.block_size)
+            
+            return decrypted.decode('utf-8')
         except Exception as e:
             raise ValueError(f"Failed to decrypt data: {str(e)}")
     
     def encrypt_bytes(self, data: bytes) -> bytes:
         """
-        Encrypt bytes data using AES-256-GCM.
+        Encrypt bytes data using AES-256-CBC.
         
         Args:
             data: Bytes to encrypt
             
         Returns:
-            Encrypted bytes (includes nonce and ciphertext)
+            Encrypted bytes (includes IV and ciphertext)
             
         Raises:
             ValueError: If encryption fails
         """
         try:
-            # Generate a random 96-bit nonce (12 bytes) for GCM
-            nonce = os.urandom(12)
+            # Create AES cipher in CBC mode
+            cipher = AES.new(self.encryption_key, AES.MODE_CBC)
             
-            # Encrypt the data
-            ciphertext = self.cipher.encrypt(nonce, data, None)
+            # Encrypt with padding
+            cipher_text = cipher.encrypt(pad(data, AES.block_size))
             
-            # Combine nonce and ciphertext
-            return nonce + ciphertext
+            # Combine IV and ciphertext
+            return cipher.iv + cipher_text
         except Exception as e:
             raise ValueError(f"Failed to encrypt bytes: {str(e)}")
     
     def decrypt_bytes(self, encrypted_data: bytes) -> bytes:
         """
-        Decrypt encrypted bytes data using AES-256-GCM.
+        Decrypt encrypted bytes data using AES-256-CBC.
         
         Args:
-            encrypted_data: Encrypted bytes (includes nonce and ciphertext)
+            encrypted_data: Encrypted bytes (includes IV and ciphertext)
             
         Returns:
             Decrypted bytes
@@ -134,12 +140,15 @@ class EncryptionService:
             ValueError: If decryption fails
         """
         try:
-            # Extract nonce (first 12 bytes) and ciphertext
-            nonce = encrypted_data[:12]
-            ciphertext = encrypted_data[12:]
+            # Extract IV (first 16 bytes) and ciphertext
+            iv = encrypted_data[:16]
+            ciphertext = encrypted_data[16:]
             
-            # Decrypt the data
-            return self.cipher.decrypt(nonce, ciphertext, None)
+            # Create AES cipher with stored IV
+            cipher = AES.new(self.encryption_key, AES.MODE_CBC, iv)
+            
+            # Decrypt and unpad
+            return unpad(cipher.decrypt(ciphertext), AES.block_size)
         except Exception as e:
             raise ValueError(f"Failed to decrypt bytes: {str(e)}")
     

@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 import cv2
 from typing import Tuple, List
+from skimage.morphology import skeletonize
 from .encryption_service import get_encryption_service
 
 
@@ -27,104 +28,45 @@ def base64_to_image(base64_string: str) -> np.ndarray:
         raise ValueError(f"Invalid image format: {str(e)}")
 
 
-def preprocess_fingerprint(image: np.ndarray) -> np.ndarray:
-    """Preprocess fingerprint image for feature extraction"""
-    # Normalize image
-    image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX)
-    
-    # Apply Gaussian blur to reduce noise
-    blurred = cv2.GaussianBlur(image, (5, 5), 0)
-    
-    # Apply adaptive thresholding
-    binary = cv2.adaptiveThreshold(
-        blurred, 255, 
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-        cv2.THRESH_BINARY_INV, 11, 2
-    )
-    
-    # Morphological operations to clean up
-    kernel = np.ones((3, 3), np.uint8)
-    cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-    cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel)
-    
-    return cleaned
-
-
-def extract_minutiae_features(image: np.ndarray) -> np.ndarray:
-    """Extract minutiae-like features from fingerprint image"""
-    # Apply thinning to get ridge skeleton
-    kernel = np.ones((3, 3), np.uint8)
-    thinned = cv2.ximgproc.thinning(image) if hasattr(cv2, 'ximgproc') else image
-    
-    # Detect edges and corners (minutiae approximation)
-    edges = cv2.Canny(image, 50, 150)
-    corners = cv2.goodFeaturesToTrack(
-        image, maxCorners=100, qualityLevel=0.01, minDistance=10
-    )
-    
-    # Create feature vector from image statistics
-    features = []
-    
-    # Divide image into blocks and extract features
-    block_size = 16
-    h, w = image.shape
-    for i in range(0, h - block_size, block_size):
-        for j in range(0, w - block_size, block_size):
-            block = image[i:i+block_size, j:j+block_size]
-            features.extend([
-                np.mean(block),
-                np.std(block),
-                np.median(block)
-            ])
-    
-    # Limit feature vector size
-    features = np.array(features[:300])
-    
-    # Add global features
-    global_features = [
-        np.mean(image),
-        np.std(image),
-        np.sum(edges) / (h * w),
-        len(corners) if corners is not None else 0
-    ]
-    
-    features = np.concatenate([features, global_features])
-    
-    # Normalize
-    if np.linalg.norm(features) > 0:
-        features = features / np.linalg.norm(features)
-    
-    return features
-
-
-def extract_orb_features(image: np.ndarray) -> np.ndarray:
-    """Extract ORB (Oriented FAST and Rotated BRIEF) features"""
-    orb = cv2.ORB_create(nfeatures=100)
-    keypoints, descriptors = orb.detectAndCompute(image, None)
-    
-    if descriptors is None or len(descriptors) == 0:
-        # Return zero vector if no features detected
-        return np.zeros(100 * 32)
-    
-    # Flatten and pad/truncate to fixed size
-    flat_descriptors = descriptors.flatten()
-    target_size = 100 * 32  # 100 keypoints * 32 descriptor size
-    
-    if len(flat_descriptors) < target_size:
-        flat_descriptors = np.pad(
-            flat_descriptors, 
-            (0, target_size - len(flat_descriptors)), 
-            'constant'
-        )
-    else:
-        flat_descriptors = flat_descriptors[:target_size]
-    
-    return flat_descriptors.astype(np.float32)
+def extract_minutiae_features(image: np.ndarray) -> dict:
+    """
+    Extract minutiae by skeletonization using Crossing Number (CN) technique.
+    Crossing Number on binary skeleton identifies:
+    - CN = 1: Termination (ridge ending)
+    - CN = 3: Bifurcation (ridge split)
+    """
+    try:
+        # Binarization
+        _, binary = cv2.threshold(image, 127, 255, cv2.THRESH_BINARY_INV)
+        
+        # Skeletonization
+        skeleton = skeletonize(binary / 255).astype(np.uint8)
+        
+        # Kernel for calculating number of neighbors (Crossing Number)
+        # Central pixel gets weight 10, neighbors get weight 1
+        kernel = np.array([[1, 1, 1], [1, 10, 1], [1, 1, 1]])
+        neighbor_sum = cv2.filter2D(skeleton, -1, kernel, borderType=cv2.BORDER_CONSTANT)
+        
+        # 11 = 1 central pixel (10) + 1 neighbor (1) -> Termination
+        # 13 = 1 central pixel (10) + 3 neighbors (3) -> Bifurcation
+        term_coords = np.argwhere(neighbor_sum == 11)
+        bif_coords = np.argwhere(neighbor_sum == 13)
+        
+        return {
+            'terminations': len(term_coords),
+            'bifurcations': len(bif_coords),
+            'term_coords': term_coords.tolist() if len(term_coords) > 0 else [],
+            'bif_coords': bif_coords.tolist() if len(bif_coords) > 0 else []
+        }
+    except Exception as e:
+        raise ValueError(f"Minutiae extraction failed: {str(e)}")
 
 
 def extract_fingerprint_encoding(image_array: np.ndarray) -> list:
     """
-    Extract comprehensive fingerprint encoding combining multiple features
+    Extract comprehensive fingerprint encoding based on minutiae features.
+    Returns a feature vector including termination and bifurcation counts,
+    along with image statistics and minutiae spatial positions.
     """
     try:
         # Ensure grayscale
@@ -134,24 +76,65 @@ def extract_fingerprint_encoding(image_array: np.ndarray) -> list:
         # Resize to standard size
         image_array = cv2.resize(image_array, (256, 256))
         
-        # Preprocess
-        processed = preprocess_fingerprint(image_array)
+        # Extract minutiae features
+        minutiae = extract_minutiae_features(image_array)
         
-        # Extract different feature types
-        minutiae_features = extract_minutiae_features(processed)
-        orb_features = extract_orb_features(processed)
+        # Create feature vector starting with minutiae counts
+        feature_vector = [
+            float(minutiae['terminations']),
+            float(minutiae['bifurcations']),
+        ]
         
-        # Combine features
-        combined_features = np.concatenate([
-            minutiae_features,
-            orb_features[:500]  # Limit ORB features
-        ])
+        # Add spatial positions of minutiae (normalized coordinates)
+        # This makes the encoding much more distinctive
+        term_coords = np.array(minutiae['term_coords']) if minutiae['term_coords'] else np.array([])
+        bif_coords = np.array(minutiae['bif_coords']) if minutiae['bif_coords'] else np.array([])
         
-        # Normalize final encoding
-        if np.linalg.norm(combined_features) > 0:
-            combined_features = combined_features / np.linalg.norm(combined_features)
+        # Flatten and add up to 20 termination positions (x, y pairs)
+        if len(term_coords) > 0:
+            flat_terms = term_coords.flatten() / 256.0  # Normalize to [0,1]
+            feature_vector.extend(flat_terms[:40].tolist())  # Up to 20 points
+            # Pad if less than 20
+            if len(flat_terms) < 40:
+                feature_vector.extend([0.0] * (40 - len(flat_terms)))
+        else:
+            feature_vector.extend([0.0] * 40)
         
-        return combined_features.tolist()
+        # Flatten and add up to 20 bifurcation positions (x, y pairs)
+        if len(bif_coords) > 0:
+            flat_bifs = bif_coords.flatten() / 256.0  # Normalize to [0,1]
+            feature_vector.extend(flat_bifs[:40].tolist())  # Up to 20 points
+            # Pad if less than 20
+            if len(flat_bifs) < 40:
+                feature_vector.extend([0.0] * (40 - len(flat_bifs)))
+        else:
+            feature_vector.extend([0.0] * 40)
+        
+        # Add spatial distribution features (divide image into 8x8 grid = 64 blocks)
+        block_size = 32
+        h, w = image_array.shape
+        for i in range(0, h - block_size, block_size):
+            for j in range(0, w - block_size, block_size):
+                block = image_array[i:i+block_size, j:j+block_size]
+                # Add mean, std, and variance for better discrimination
+                feature_vector.extend([
+                    float(np.mean(block)) / 255.0,
+                    float(np.std(block)) / 128.0,
+                    float(np.var(block)) / 10000.0
+                ])
+        
+        # Convert to numpy array (don't normalize to preserve distinctiveness)
+        feature_vector = np.array(feature_vector)
+        
+        # Add histogram features for additional distinctiveness
+        hist = cv2.calcHist([image_array], [0], None, [32], [0, 256]).flatten()
+        hist = hist / (hist.sum() + 1e-9)  # Normalize histogram
+        feature_vector = np.concatenate([feature_vector, hist])
+        
+        print(f"[FINGERPRINT ENCODING] Feature vector length: {len(feature_vector)}")
+        print(f"[FINGERPRINT ENCODING] Minutiae - Terms: {minutiae['terminations']}, Bifs: {minutiae['bifurcations']}")
+        
+        return feature_vector.tolist()
     
     except Exception as e:
         raise ValueError(f"Fingerprint encoding failed: {str(e)}")
@@ -189,11 +172,12 @@ def enroll_fingerprint(base64_image: str) -> str:
 def verify_fingerprint(
     base64_image: str, 
     stored_encrypted_encoding: str, 
-    tolerance: float = 0.6
+    tolerance: float = 0.05
 ) -> dict:
     """
     Verify a fingerprint against stored encrypted encoding
     Returns: dict with 'success', 'confidence', 'similarity', and 'threshold'
+    Requires 95% similarity (tolerance 0.05) for match
     """
     try:
         encryption_service = get_encryption_service()
@@ -212,25 +196,46 @@ def verify_fingerprint(
         new_encoding_array = np.array(new_encoding)
         stored_encoding_array = np.array(stored_encoding)
         
-        # Calculate cosine similarity
+        print(f"[FINGERPRINT VERIFY] Encoding lengths - New: {len(new_encoding_array)}, Stored: {len(stored_encoding_array)}")
+        
+        # Calculate multiple similarity metrics for robustness
+        # 1. Cosine similarity
         dot_product = np.dot(new_encoding_array, stored_encoding_array)
         norm_a = np.linalg.norm(new_encoding_array)
         norm_b = np.linalg.norm(stored_encoding_array)
         
         if norm_a == 0 or norm_b == 0:
-            similarity = 0
+            cosine_similarity = 0.0
         else:
-            similarity = dot_product / (norm_a * norm_b)
+            cosine_similarity = dot_product / (norm_a * norm_b)
+        
+        # 2. Euclidean distance (converted to similarity)
+        euclidean_dist = np.linalg.norm(new_encoding_array - stored_encoding_array)
+        max_dist = np.sqrt(len(new_encoding_array) * 2)  # Maximum possible distance
+        euclidean_similarity = 1.0 - (euclidean_dist / max_dist)
+        
+        # 3. Correlation coefficient
+        if np.std(new_encoding_array) > 0 and np.std(stored_encoding_array) > 0:
+            correlation = np.corrcoef(new_encoding_array, stored_encoding_array)[0, 1]
+        else:
+            correlation = 0.0
+        
+        # Combine metrics (weighted average)
+        similarity = (cosine_similarity * 0.5 + euclidean_similarity * 0.3 + correlation * 0.2)
         
         # Ensure similarity is in [0, 1] range
         similarity = max(0, min(1, similarity))
         
-        # Determine if it's a match
+        # Determine if it's a match (requires 95% similarity)
         threshold = 1 - tolerance
         is_match = similarity >= threshold
         
         # Calculate confidence (0-100)
         confidence = similarity * 100
+        
+        print(f"[FINGERPRINT VERIFY] Cosine: {cosine_similarity:.4f}, Euclidean: {euclidean_similarity:.4f}, Correlation: {correlation:.4f}")
+        print(f"[FINGERPRINT VERIFY] Combined Similarity: {similarity:.4f}, Threshold: {threshold:.4f}, Match: {is_match}")
+        print(f"[FINGERPRINT VERIFY] Confidence: {confidence:.2f}%, Tolerance: {tolerance}")
         
         return {
             "success": bool(is_match),
