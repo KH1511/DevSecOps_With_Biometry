@@ -19,7 +19,7 @@ export interface AuthState {
   isAuthenticated: boolean;
   passwordVerified: boolean;
   biometricVerified: boolean;
-  currentStep: 'password' | 'biometric' | 'complete';
+  currentStep: 'password' | 'enrollment-required' | 'biometric' | 'complete';
 }
 
 export interface Command {

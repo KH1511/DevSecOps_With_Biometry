@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth, AuthProvider } from '@/contexts/AuthContext';
 import { LoginForm } from '@/components/LoginForm';
 import { BiometricVerification } from '@/components/BiometricVerification';
+import { ForcedBiometricEnrollment } from '@/components/ForcedBiometricEnrollment';
 import { CommandDashboard } from '@/components/CommandDashboard';
 import { AdminPanel } from '@/components/AdminPanel';
 import { Header } from '@/components/Header';
@@ -47,6 +48,7 @@ function AuthFlow() {
       
       <div className="relative z-10 w-full max-w-md">      
         {currentStep === 'password' && <LoginForm />}
+        {currentStep === 'enrollment-required' && passwordVerified && <ForcedBiometricEnrollment />}
         {currentStep === 'biometric' && passwordVerified && <BiometricVerification />}
       </div>
 

@@ -21,7 +21,7 @@ export function LoginForm() {
     try {
       const success = await login(username, password);
       if (success) {
-        toast.success('Password verified. Proceed to biometric authentication.');
+        toast.success('Login successful!');
       } else {
         setError('Invalid credentials. Please try again.');
       }

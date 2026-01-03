@@ -37,6 +37,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Check if biometric verification was completed based on backend response
       const biometricVerified = userData.biometric_verified || false;
       
+      // Check if user has any biometrics enrolled
+      const hasBiometrics = userData.biometrics && Object.values(userData.biometrics).some((enabled: boolean) => enabled);
+      
       setAuthState({
         user: {
           id: userData.id.toString(),
@@ -48,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: biometricVerified,
         passwordVerified: true,
         biometricVerified: biometricVerified,
-        currentStep: biometricVerified ? 'complete' : 'biometric',
+        currentStep: biometricVerified ? 'complete' : (!hasBiometrics ? 'enrollment-required' : 'biometric'),
       });
     } catch (error) {
       console.error('Failed to load user:', error);
@@ -68,6 +71,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await authAPI.login(username, password);
       const userData = await authAPI.getCurrentUser();
       
+      // Check if user has any biometrics enrolled
+      const hasBiometrics = userData.biometrics && Object.values(userData.biometrics).some((enabled: boolean) => enabled);
+      
       setAuthState(prev => ({
         ...prev,
         user: {
@@ -78,7 +84,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           isActive: userData.is_active,
         },
         passwordVerified: true,
-        currentStep: 'biometric',
+        isAuthenticated: false,
+        biometricVerified: false,
+        currentStep: hasBiometrics ? 'biometric' : 'enrollment-required',
       }));
       return true;
     } catch (error) {

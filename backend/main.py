@@ -54,14 +54,14 @@ def init_db():
         db.commit()
         db.refresh(admin_user)
         
-        # Create biometric data for admin
+        # Create biometric data for admin (all disabled by default)
         biometric_types = ["face", "fingerprint", "voice"]
         for bio_type in biometric_types:
             biometric = BiometricData(
                 user_id=admin_user.id,
                 biometric_type=bio_type,
-                is_enrolled=True if bio_type in ["face", "fingerprint"] else False,
-                enrollment_data=f"mock_{bio_type}_data"
+                is_enrolled=False,
+                enrollment_data=None
             )
             db.add(biometric)
         
