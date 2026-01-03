@@ -19,6 +19,7 @@ from auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
 import services.face_recognition_service as face_service
+import services.voice_recognition_service as voice_service
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -159,16 +160,13 @@ async def enroll_biometric(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    # For face recognition, process the image
     if biometric_data.biometric_type == "face":
         if not biometric_data.enrollment_data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Face image data is required for face recognition enrollment"
             )
-        
         try:
-            # Extract and encrypt face encoding
             encrypted_encoding = face_service.enroll_face(biometric_data.enrollment_data)
             enrollment_data = encrypted_encoding
         except ValueError as e:
@@ -176,8 +174,20 @@ async def enroll_biometric(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(e)
             )
+    elif biometric_data.biometric_type == "voice":
+        if not biometric_data.enrollment_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Voice audio data is required for voice enrollment"
+            )
+        try:
+            enrollment_data = voice_service.enroll_voice(biometric_data.enrollment_data)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
     else:
-        # For fingerprint and voice (mock for now)
         await asyncio.sleep(3)
         enrollment_data = biometric_data.enrollment_data or f"mock_{biometric_data.biometric_type}_data"
     
@@ -224,57 +234,78 @@ async def verify_biometric(
             message=f"{biometric_verify.biometric_type.capitalize()} biometric not enrolled"
         )
     
-    # For face recognition, verify the image
     if biometric_verify.biometric_type == "face":
         if not biometric_verify.verification_data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Face image data is required for verification"
             )
-        
         try:
-            # Verify face against stored encrypted encoding
             result = face_service.verify_face(
                 biometric_verify.verification_data,
                 biometric.enrollment_data
             )
-            
             if result["success"]:
-                # Issue new token with biometric_verified=True
                 access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
                 new_token = create_access_token(
                     data={"sub": current_user.username},
                     expires_delta=access_token_expires,
                     biometric_verified=True
                 )
-                
                 return BiometricResponse(
                     success=True,
                     message=f"Face verification successful (confidence: {result['confidence']:.1f}%)",
                     token=new_token
                 )
-            else:
-                return BiometricResponse(
-                    success=False,
-                    message=f"Face verification failed (confidence: {result['confidence']:.1f}%)"
+            return BiometricResponse(
+                success=False,
+                message=f"Face verification failed (confidence: {result['confidence']:.1f}%)"
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
+    elif biometric_verify.biometric_type == "voice":
+        if not biometric_verify.verification_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Voice audio data is required for verification"
+            )
+        try:
+            result = voice_service.verify_voice(
+                biometric_verify.verification_data,
+                biometric.enrollment_data
+            )
+            if result["success"]:
+                access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+                new_token = create_access_token(
+                    data={"sub": current_user.username},
+                    expires_delta=access_token_expires,
+                    biometric_verified=True
                 )
+                return BiometricResponse(
+                    success=True,
+                    message=f"Voice verification successful (confidence: {result['confidence']:.1f}%)",
+                    token=new_token
+                )
+            return BiometricResponse(
+                success=False,
+                message=f"Voice verification failed (confidence: {result['confidence']:.1f}%)"
+            )
         except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(e)
             )
     else:
-        # For fingerprint and voice (mock for now)
         await asyncio.sleep(2)
-        
-        # Issue new token with biometric_verified=True
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         new_token = create_access_token(
             data={"sub": current_user.username},
             expires_delta=access_token_expires,
             biometric_verified=True
         )
-        
         return BiometricResponse(
             success=True,
             message=f"{biometric_verify.biometric_type.capitalize()} verification successful",

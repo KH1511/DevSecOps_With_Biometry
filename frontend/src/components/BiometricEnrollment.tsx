@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { WebcamCapture } from '@/components/WebcamCapture';
+import { AudioCapture } from '@/components/AudioCapture';
 import { BiometricType } from '@/types/auth';
 import { 
   Fingerprint, 
@@ -76,6 +77,7 @@ export function BiometricEnrollment({ onBack }: BiometricEnrollmentProps) {
   const [isEnrolling, setIsEnrolling] = useState(false);
   const [enrollmentComplete, setEnrollmentComplete] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  const [showAudio, setShowAudio] = useState(false);
 
   const startEnrollment = (type: BiometricType) => {
     setSelectedType(type);
@@ -85,6 +87,10 @@ export function BiometricEnrollment({ onBack }: BiometricEnrollmentProps) {
     if (type === 'face') {
       setShowCamera(true);
       setIsEnrolling(false); // Don't set enrolling yet, wait for camera capture
+    } else if (type === 'voice') {
+      // For voice, show audio capture
+      setShowAudio(true);
+      setIsEnrolling(false);
     } else {
       // For other biometrics, use the old flow
       setIsEnrolling(true);
@@ -125,6 +131,38 @@ export function BiometricEnrollment({ onBack }: BiometricEnrollmentProps) {
         toast.error(`Face enrollment failed: ${error.message}`);
       } else {
         toast.error('Face enrollment failed. Please try again.');
+      }
+      setIsEnrolling(false);
+      setSelectedType(null);
+    }
+  };
+
+  const handleAudioCapture = async (base64Audio: string) => {
+    setShowAudio(false);
+    setIsEnrolling(true);
+
+    try {
+      if (user) {
+        const success = await enrollBiometric(user.id, 'voice', base64Audio);
+        if (success) {
+          setEnrollmentComplete(true);
+          toast.success('Voice recognition enrolled successfully!');
+        } else {
+          toast.error('Voice enrollment failed. Please try again.');
+          setIsEnrolling(false);
+          setSelectedType(null);
+        }
+      } else {
+        toast.error('User session not found. Please login again.');
+        setIsEnrolling(false);
+        setSelectedType(null);
+      }
+    } catch (error) {
+      console.error('Voice enrollment error:', error);
+      if (error instanceof Error) {
+        toast.error(`Voice enrollment failed: ${error.message}`);
+      } else {
+        toast.error('Voice enrollment failed. Please try again.');
       }
       setIsEnrolling(false);
       setSelectedType(null);
@@ -245,6 +283,18 @@ export function BiometricEnrollment({ onBack }: BiometricEnrollmentProps) {
           onCapture={handleFaceCapture}
           onCancel={() => {
             setShowCamera(false);
+            setSelectedType(null);
+            setIsEnrolling(false);
+          }}
+          isEnrollment={true}
+        />
+      )}
+
+      {showAudio && (
+        <AudioCapture
+          onCapture={handleAudioCapture}
+          onCancel={() => {
+            setShowAudio(false);
             setSelectedType(null);
             setIsEnrolling(false);
           }}

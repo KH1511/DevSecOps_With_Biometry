@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { WebcamCapture } from '@/components/WebcamCapture';
+import { AudioCapture } from '@/components/AudioCapture';
 import { BiometricType } from '@/types/auth';
 import { Fingerprint, ScanFace, Mic, CheckCircle2, XCircle, Shield } from 'lucide-react';
 import { toast } from 'sonner';
@@ -30,6 +31,7 @@ export function BiometricVerification() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<'idle' | 'scanning' | 'success' | 'failed'>('idle');
   const [showCamera, setShowCamera] = useState(false);
+  const [showAudio, setShowAudio] = useState(false);
 
   const availableBiometrics = user?.biometrics 
     ? (Object.entries(user.biometrics) as [BiometricType, boolean][])
@@ -43,6 +45,9 @@ export function BiometricVerification() {
     // For face recognition, show camera
     if (type === 'face') {
       setShowCamera(true);
+    } else if (type === 'voice') {
+      // For voice, show audio capture
+      setShowAudio(true);
     } else {
       // For other biometrics, use the old flow
       setIsVerifying(true);
@@ -89,6 +94,29 @@ export function BiometricVerification() {
     }
   };
 
+  const handleAudioCapture = async (base64Audio: string) => {
+    setShowAudio(false);
+    setIsVerifying(true);
+    setVerificationStatus('scanning');
+
+    try {
+      const success = await verifyBiometric('voice', base64Audio);
+      if (success) {
+        setVerificationStatus('success');
+        toast.success('Voice verification successful!');
+      } else {
+        setVerificationStatus('failed');
+        toast.error('Voice verification failed. Please try again.');
+      }
+    } catch (error) {
+      console.error('Voice verification error:', error);
+      setVerificationStatus('failed');
+      toast.error('An error occurred during verification.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   const resetVerification = () => {
     setSelectedType(null);
     setVerificationStatus('idle');
@@ -101,6 +129,18 @@ export function BiometricVerification() {
           onCapture={handleFaceCapture}
           onCancel={() => {
             setShowCamera(false);
+            setSelectedType(null);
+            setVerificationStatus('idle');
+          }}
+          isEnrollment={false}
+        />
+      )}
+
+      {showAudio && (
+        <AudioCapture
+          onCapture={handleAudioCapture}
+          onCancel={() => {
+            setShowAudio(false);
             setSelectedType(null);
             setVerificationStatus('idle');
           }}

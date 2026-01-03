@@ -63,6 +63,8 @@ Once the server is running, visit:
 - `POST /biometric/verify` - Verify biometric (mock)
 - `PUT /biometric/toggle` - Enable/disable biometric
 
+Voice enrollment/verification expects base64-encoded WAV/PCM audio; the server derives an encrypted voice signature and compares via cosine similarity.
+
 ### Commands
 - `GET /commands` - Get all available commands
 - `POST /commands/execute` - Execute a command
