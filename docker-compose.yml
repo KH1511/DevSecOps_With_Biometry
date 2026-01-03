@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: devsecops_console_db
+    environment:
+      POSTGRES_USER: devsecops_user
+      POSTGRES_PASSWORD: devsecops_password
+      POSTGRES_DB: secure_console
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devsecops_user -d secure_console"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - devsecops_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: devsecops_console_backend
+    environment:
+      DATABASE_USER: devsecops_user
+      DATABASE_PASSWORD: devsecops_password
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: secure_console
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - devsecops_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: devsecops_console_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - devsecops_network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  devsecops_network:
+    driver: bridge
