@@ -10,7 +10,7 @@ import { Header } from '@/components/Header';
 import { Shield } from 'lucide-react';
 
 function AuthFlow() {
-  const { isAuthenticated, passwordVerified, currentStep } = useAuth();
+  const { isAuthenticated, passwordVerified, currentStep, isLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'admin'>('dashboard');
@@ -30,6 +30,20 @@ function AuthFlow() {
     setActiveTab(tab);
     navigate(tab === 'dashboard' ? '/' : '/admin');
   };
+
+  // Show loading state while checking authentication
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background grid-pattern flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="w-16 h-16 mx-auto bg-primary/20 rounded-full flex items-center justify-center border border-primary/50 animate-pulse">
+            <Shield className="w-8 h-8 text-primary" />
+          </div>
+          <p className="text-sm text-muted-foreground font-mono">VERIFYING SESSION...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (isAuthenticated) {
     return (

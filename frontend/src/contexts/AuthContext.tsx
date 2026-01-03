@@ -9,6 +9,7 @@ interface AuthContextType extends AuthState {
   enrollBiometric: (userId: string, type: BiometricType, enrollmentData?: string) => Promise<boolean>;
   updateUserBiometric: (userId: string, type: BiometricType, enabled: boolean) => void;
   loadUser: () => Promise<void>;
+  isLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -21,12 +22,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     biometricVerified: false,
     currentStep: 'password',
   });
+  const [isLoading, setIsLoading] = useState(true);
 
   // Load user on mount if token exists
   useEffect(() => {
     const token = localStorage.getItem('access_token');
     if (token) {
       loadUser();
+    } else {
+      setIsLoading(false);
     }
   }, []);
 
@@ -63,6 +67,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         biometricVerified: false,
         currentStep: 'password',
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -190,6 +196,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       enrollBiometric,
       updateUserBiometric,
       loadUser,
+      isLoading,
     }}>
       {children}
     </AuthContext.Provider>
