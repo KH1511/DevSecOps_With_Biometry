@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { WebcamCapture } from '@/components/WebcamCapture';
-import { AudioCapture } from '@/components/AudioCapture';
 import { BiometricType } from '@/types/auth';
 import { Fingerprint, ScanFace, Mic, CheckCircle2, XCircle, Shield } from 'lucide-react';
 import { toast } from 'sonner';
@@ -31,8 +30,6 @@ export function BiometricVerification() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<'idle' | 'scanning' | 'success' | 'failed'>('idle');
   const [showCamera, setShowCamera] = useState(false);
-  const [showAudioCapture, setShowAudioCapture] = useState(false);
-  const [voicePhrase, setVoicePhrase] = useState('');
 
   const availableBiometrics = user?.biometrics 
     ? (Object.entries(user.biometrics) as [BiometricType, boolean][])
@@ -43,20 +40,11 @@ export function BiometricVerification() {
   const handleVerify = async (type: BiometricType) => {
     setSelectedType(type);
     
+    // For face recognition, show camera
     if (type === 'face') {
       setShowCamera(true);
-    } else if (type === 'voice') {
-      // Generate a random phrase for voice verification
-      const phrases = [
-        'My voice is my password',
-        'Authenticate my identity',
-        'Secure access granted',
-        'Voice recognition enabled'
-      ];
-      setVoicePhrase(phrases[Math.floor(Math.random() * phrases.length)]);
-      setShowAudioCapture(true);
     } else {
-      // For fingerprint
+      // For other biometrics, use the old flow
       setIsVerifying(true);
       setVerificationStatus('scanning');
 
@@ -101,29 +89,6 @@ export function BiometricVerification() {
     }
   };
 
-  const handleVoiceCapture = async (base64Audio: string) => {
-    setShowAudioCapture(false);
-    setIsVerifying(true);
-    setVerificationStatus('scanning');
-
-    try {
-      const success = await verifyBiometric('voice', base64Audio);
-      if (success) {
-        setVerificationStatus('success');
-        toast.success('Voice verification successful!');
-      } else {
-        setVerificationStatus('failed');
-        toast.error('Voice verification failed. Please try again.');
-      }
-    } catch (error) {
-      console.error('Voice verification error:', error);
-      setVerificationStatus('failed');
-      toast.error('An error occurred during verification.');
-    } finally {
-      setIsVerifying(false);
-    }
-  };
-
   const resetVerification = () => {
     setSelectedType(null);
     setVerificationStatus('idle');
@@ -139,19 +104,6 @@ export function BiometricVerification() {
             setSelectedType(null);
             setVerificationStatus('idle');
           }}
-          isEnrollment={false}
-        />
-      )}
-
-      {showAudioCapture && (
-        <AudioCapture
-          onCapture={handleVoiceCapture}
-          onCancel={() => {
-            setShowAudioCapture(false);
-            setSelectedType(null);
-            setVerificationStatus('idle');
-          }}
-          phrase={voicePhrase}
           isEnrollment={false}
         />
       )}

@@ -33,6 +33,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadUser = async () => {
     try {
       const userData = await authAPI.getCurrentUser();
+      
+      // Check if biometric verification was completed based on backend response
+      const biometricVerified = userData.biometric_verified || false;
+      
       setAuthState({
         user: {
           id: userData.id.toString(),
@@ -41,14 +45,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           biometrics: userData.biometrics,
           isActive: userData.is_active,
         },
-        isAuthenticated: true,
+        isAuthenticated: biometricVerified,
         passwordVerified: true,
-        biometricVerified: true,
-        currentStep: 'complete',
+        biometricVerified: biometricVerified,
+        currentStep: biometricVerified ? 'complete' : 'biometric',
       });
     } catch (error) {
       console.error('Failed to load user:', error);
       localStorage.removeItem('access_token');
+      setAuthState({
+        user: null,
+        isAuthenticated: false,
+        passwordVerified: false,
+        biometricVerified: false,
+        currentStep: 'password',
+      });
     }
   };
 
@@ -81,6 +92,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await biometricAPI.verify(type, verificationData);
       
       if (result.success) {
+        // Update token if provided
+        if (result.token) {
+          localStorage.setItem('access_token', result.token);
+        }
+        
         setAuthState(prev => ({
           ...prev,
           isAuthenticated: true,
