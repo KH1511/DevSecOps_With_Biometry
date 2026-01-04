@@ -1,6 +1,6 @@
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Camera, X, Check, RotateCcw } from 'lucide-react';
+import { Camera, X, Check, RotateCcw, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface WebcamCaptureProps {
@@ -10,79 +10,43 @@ interface WebcamCaptureProps {
 }
 
 export function WebcamCapture({ onCapture, onCancel, isEnrollment = false }: WebcamCaptureProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
-  const [isCameraReady, setIsCameraReady] = useState(false);
-  const [faceDetected, setFaceDetected] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    startCamera();
-    return () => {
-      stopCamera();
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please upload a valid image file');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image file is too large. Please upload an image smaller than 5MB');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const imageData = e.target?.result as string;
+      setCapturedImage(imageData);
     };
-  }, []);
-
-  const startCamera = async () => {
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          facingMode: 'user'
-        }
-      });
-      
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-        setStream(mediaStream);
-        setIsCameraReady(true);
-      }
-    } catch (error) {
-      console.error('Error accessing camera:', error);
-      toast.error('Failed to access camera. Please check permissions.');
-    }
+    reader.readAsDataURL(file);
   };
-
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
-    }
-  };
-
-  const capturePhoto = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current) return;
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
-
-    if (!context) return;
-
-    // Set canvas dimensions to match video
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
-    // Draw video frame to canvas
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    // Convert to base64
-    const base64Image = canvas.toDataURL('image/jpeg', 0.9);
-    setCapturedImage(base64Image);
-    setFaceDetected(null);
-  }, []);
 
   const retake = () => {
     setCapturedImage(null);
-    setFaceDetected(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   const confirmCapture = () => {
     if (capturedImage) {
       onCapture(capturedImage);
-      stopCamera();
     }
   };
 
@@ -98,61 +62,62 @@ export function WebcamCapture({ onCapture, onCancel, isEnrollment = false }: Web
           </Button>
         </div>
 
-        <div className="relative bg-black rounded-lg overflow-hidden mb-4">
-          {!capturedImage ? (
-            <>
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-auto"
-              />
-              {isCameraReady && (
-                <div className="absolute inset-0 pointer-events-none">
-                  {/* Face detection overlay */}
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-64 h-64 border-4 border-primary/50 rounded-full animate-pulse" />
-                  </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <img src={capturedImage} alt="Captured" className="w-full h-auto" />
-          )}
-        </div>
-
-        {/* Hidden canvas for capture */}
-        <canvas ref={canvasRef} className="hidden" />
-
-        <div className="space-y-3">
-          <div className="text-sm text-muted-foreground text-center">
+        <div className="space-y-4">
+          <div className="border-2 border-dashed border-primary/30 rounded-lg p-6 bg-card/50">
             {!capturedImage ? (
-              <>
-                <p className="font-mono">Position your face in the center</p>
-                <p className="text-xs mt-1">Ensure good lighting and remove glasses if possible</p>
-              </>
+              <div className="text-center space-y-4">
+                <div className="w-24 h-24 mx-auto bg-primary/10 rounded-full flex items-center justify-center">
+                  <Camera className="w-12 h-12 text-primary" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Upload a clear photo of your face
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    id="face-upload"
+                  />
+                  <Button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="gap-2"
+                  >
+                    <Upload className="w-4 h-4" />
+                    Upload Face Photo
+                  </Button>
+                </div>
+                <div className="text-xs text-muted-foreground mt-4 space-y-1 text-left bg-info/10 border border-info/30 rounded-lg p-3">
+                  <p className="font-semibold mb-1">Tips for best results:</p>
+                  <p>• Face the camera directly</p>
+                  <p>• Ensure good lighting</p>
+                  <p>• Remove glasses if possible</p>
+                  <p>• Keep a neutral expression</p>
+                </div>
+              </div>
             ) : (
-              <p className="font-mono text-success">Photo captured! Review and confirm.</p>
+              <div className="space-y-4">
+                <div className="relative">
+                  <img
+                    src={capturedImage}
+                    alt="Captured face"
+                    className="w-full h-64 object-contain rounded-lg bg-black/5"
+                  />
+                </div>
+                <p className="text-sm text-center text-success font-mono">
+                  Photo uploaded! Review and confirm.
+                </p>
+              </div>
             )}
           </div>
 
           <div className="flex gap-3">
             {!capturedImage ? (
-              <>
-                <Button
-                  variant="terminal"
-                  className="flex-1"
-                  onClick={capturePhoto}
-                  disabled={!isCameraReady}
-                >
-                  <Camera className="w-4 h-4 mr-2" />
-                  Capture Photo
-                </Button>
-                <Button variant="outline" onClick={onCancel}>
-                  Cancel
-                </Button>
-              </>
+              <Button variant="outline" className="w-full" onClick={onCancel}>
+                Cancel
+              </Button>
             ) : (
               <>
                 <Button variant="terminal" className="flex-1" onClick={confirmCapture}>

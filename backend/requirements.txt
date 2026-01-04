@@ -1,17 +1,24 @@
+# Core Framework
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+
+# Database
 sqlalchemy==2.0.36
+psycopg2-binary==2.9.9
+
+# Data Validation & Security
 pydantic==2.10.3
 python-jose[cryptography]==3.3.0
-python-multipart==0.0.20
+pycryptodome==3.19.1
+
+# Image Processing (Face & Fingerprint Recognition)
 opencv-python==4.10.0.84
 pillow==11.0.0
-psycopg2-binary==2.9.9
-scipy==1.11.4
+pillow-avif-plugin==1.4.6
 numpy==1.26.4
-mediapipe==0.10.9
 scikit-image==0.22.0
-pycryptodome==3.19.1
-speechbrain==1.0.0
-torch==2.1.0
-torchaudio==2.1.0
+
+# Voice Recognition
+scipy==1.11.4
+librosa==0.10.1

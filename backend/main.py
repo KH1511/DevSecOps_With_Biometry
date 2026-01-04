@@ -4,7 +4,12 @@ from sqlalchemy.orm import Session
 from datetime import timedelta
 import asyncio
 from typing import List
+import logging
 import services.fingerprint_recognition_service as fingerprint_service
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 from database import engine, get_db, Base
@@ -162,6 +167,9 @@ async def enroll_biometric(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    logger.info(f"Biometric enrollment request - Type: {biometric_data.biometric_type}, User: {current_user.username}")
+    logger.info(f"Enrollment data length: {len(biometric_data.enrollment_data) if biometric_data.enrollment_data else 0}")
+    
     if biometric_data.biometric_type == "face":
         if not biometric_data.enrollment_data:
             raise HTTPException(
@@ -169,9 +177,11 @@ async def enroll_biometric(
                 detail="Face image data is required for face recognition enrollment"
             )
         try:
+            logger.info(f"Calling face_service.enroll_face with data length: {len(biometric_data.enrollment_data)}")
             encrypted_encoding = face_service.enroll_face(biometric_data.enrollment_data)
             enrollment_data = encrypted_encoding
         except ValueError as e:
+            logger.error(f"Face enrollment error: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(e)
