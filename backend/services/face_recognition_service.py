@@ -219,13 +219,13 @@ def enroll_face(base64_image: str) -> str:
     except Exception as e:
         raise ValueError(f"Face enrollment failed: {str(e)}")
 
-def verify_face(base64_image: str, stored_encrypted_encoding: str, tolerance: float = 0.15) -> dict:
+def verify_face(base64_image: str, stored_encrypted_encoding: str, tolerance: float = 0.10) -> dict:
     """
     Verify a face against stored encrypted encoding
     Returns: dict with 'success' and 'confidence' keys
     
     Note: tolerance represents the maximum allowed distance (lower = stricter)
-    Default 0.15 means 85% similarity required for match
+    Default 0.10 means 90% similarity required for match
     """
     try:
         logger.info("Starting face verification")
